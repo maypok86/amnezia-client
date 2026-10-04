@@ -122,9 +122,10 @@ bool WindowsTunnelService::start(const QString& configData) {
     if (service) {
       CloseServiceHandle(service);
     }
+    // the worker is deleted by deleteLater on QThread::finished (as in stop());
+    // deleting it here as well was a double free that crashed the service
     m_logthread.quit();
     m_logthread.wait();
-    delete m_logworker;
     m_logworker = nullptr;
   });
 
@@ -137,6 +138,17 @@ bool WindowsTunnelService::start(const QString& configData) {
     }
     CloseServiceHandle(service);
     service = nullptr;
+
+    // a service marked for deletion only goes away once every handle to it is
+    // closed; creating the new one before that fails
+    for (int i = 0; i < 50; ++i) {
+      SC_HANDLE stale = OpenService(scm, TUNNEL_SERVICE_NAME, SERVICE_QUERY_STATUS);
+      if (!stale) {
+        break;
+      }
+      CloseServiceHandle(stale);
+      Sleep(100);
+    }
   }
 
   QString serviceCmdline;
@@ -228,6 +240,11 @@ static bool stopAndDeleteTunnelService(SC_HANDLE service) {
   logger.debug() << "Proceeding with the deletion";
 
   if (!DeleteService(service)) {
+    // e.g. the daemon already deleted it on startup while it was still running
+    if (GetLastError() == ERROR_SERVICE_MARKED_FOR_DELETE) {
+      logger.debug() << "The service is already marked for deletion";
+      return true;
+    }
     WindowsUtils::windowsLog("Failed to delete the service");
     return false;
   }
