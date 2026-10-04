@@ -52,13 +52,37 @@ jobs:
     - name: 'Install conan'
       run: pip install "conan==2.28.0"
 
+    # a stable self-signed identity: the keychain grants the app access to its settings key by
+    # signature, and an ad-hoc signature changes with every build
+    - name: 'Import signing certificate'
+      env:
+        CERT_P12_BASE64: ${{ secrets.MAC_PERSONAL_CERT_P12_BASE64 }}
+        CERT_PASS: ${{ secrets.MAC_PERSONAL_CERT_PASS }}
+      shell: bash
+      run: |
+        keychain="$RUNNER_TEMP/signing.keychain-db"
+        keychain_pass=$(openssl rand -hex 16)
+        security create-keychain -p "$keychain_pass" "$keychain"
+        security set-keychain-settings -lut 21600 "$keychain"
+        security unlock-keychain -p "$keychain_pass" "$keychain"
+        echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+        security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$CERT_PASS" -T /usr/bin/codesign
+        rm "$RUNNER_TEMP/cert.p12"
+        security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_pass" "$keychain" > /dev/null
+        security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+        identity=$(security find-identity -p codesigning "$keychain" | awk '/AmneziaVPN Personal Code Signing/ {print $2; exit}')
+        [ -n "$identity" ] || { echo "signing identity not found"; exit 1; }
+        echo "CODESIGN_SIGNATURE=$identity" >> "$GITHUB_ENV"
+        echo "CODESIGN_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
     - name: 'Build project'
       env:
         QT_INSTALL_DIR: ${{ runner.temp }}
-        # ad-hoc signature, no Developer ID
-        CODESIGN_SIGNATURE: '-'
+        CODESIGN_PLAIN: '1'
       shell: bash
-      run: deploy/build.sh --generator Ninja --installer productbuild
+      run: |
+        deploy/build.sh --generator Ninja --installer productbuild
+        codesign -dv --verbose=2 deploy/build/client/AmneziaVPN.app 2>&1 | grep -E "Authority|Identifier|TeamIdentifier" || true
 
     - name: 'Upload installer'
       uses: actions/upload-artifact@v7

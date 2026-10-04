@@ -10,9 +10,9 @@ function(codesign_sign_files files signature keychain)
         --verbose
         --sign "${signature}"
     )
-    # "-" is an ad-hoc signature (personal builds without a Developer ID): no timestamp, and no
-    # hardened runtime, whose library validation would reject the ad-hoc signed frameworks
-    if(NOT signature STREQUAL "-")
+    # personal builds are signed ad-hoc ("-") or with a self-signed certificate (CODESIGN_PLAIN):
+    # no timestamp, and no hardened runtime, whose library validation needs an Apple Team ID
+    if(NOT signature STREQUAL "-" AND NOT "$ENV{CODESIGN_PLAIN}")
         list(APPEND args --timestamp --options runtime)
     endif()
 
