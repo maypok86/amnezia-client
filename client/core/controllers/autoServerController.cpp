@@ -631,8 +631,10 @@ void AutoServerController::checkHealth()
     }
     QNetworkRequest request { QUrl(kVerifyUrl) };
     request.setTransferTimeout(kVerifyTimeoutMs);
+    auto clock = QSharedPointer<QElapsedTimer>::create();
+    clock->start();
     m_healthReply = amnApp->networkManager()->get(request);
-    connect(m_healthReply, &QNetworkReply::finished, this, [this, reply = m_healthReply]() {
+    connect(m_healthReply, &QNetworkReply::finished, this, [this, reply = m_healthReply, clock]() {
         if (!reply) {
             return;
         }
@@ -642,6 +644,14 @@ void AutoServerController::checkHealth()
         }
         if (reply->error() == QNetworkReply::NoError) {
             m_healthFailures = 0;
+            // keep the server's latency current: a moving average of the periodic checks
+            QJsonObject stats = m_appSettingsRepository->autoBestServerStats();
+            const QString key = statsKey(m_connected.serverId, m_connected.statsCountry);
+            QJsonObject s = stats.value(key).toObject();
+            const double ms = clock->nsecsElapsed() / 1e6;
+            s[statKey::tunnelMs] = s.contains(statKey::tunnelMs) ? s.value(statKey::tunnelMs).toDouble() * 0.7 + ms * 0.3 : ms;
+            stats[key] = s;
+            m_appSettingsRepository->setAutoBestServerStats(stats);
             return;
         }
         ++m_healthFailures;
@@ -753,9 +763,10 @@ void AutoServerController::measureTunnelLatency(const Candidate &candidate)
 {
     // a few small HTTPS requests through the fresh tunnel; the median is stored as the server's latency
     auto samples = QSharedPointer<QVector<double>>::create();
+    auto errors = QSharedPointer<int>::create(0);
     auto next = QSharedPointer<std::function<void()>>::create();
     QWeakPointer<std::function<void()>> weakNext = next;
-    *next = [this, candidate, samples, weakNext]() {
+    *next = [this, candidate, samples, errors, weakNext]() {
         const auto self = weakNext.toStrongRef();
         if (samples->size() >= kTunnelSamples || !self) {
             if (samples->isEmpty()) {
@@ -776,10 +787,17 @@ void AutoServerController::measureTunnelLatency(const Candidate &candidate)
         auto clock = QSharedPointer<QElapsedTimer>::create();
         clock->start();
         QNetworkReply *reply = amnApp->networkManager()->get(request);
-        connect(reply, &QNetworkReply::finished, this, [this, reply, clock, samples, self]() {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, clock, samples, errors, self]() {
             reply->deleteLater();
-            if (reply->error() != QNetworkReply::NoError || !m_connectionController->isConnected()) {
-                return; // not connected any more or no internet: keep whatever was measured before
+            if (!m_connectionController->isConnected()) {
+                return; // not connected any more: keep whatever was measured before
+            }
+            if (reply->error() != QNetworkReply::NoError) {
+                // routes and DNS may still be settling right after connect
+                if (++*errors <= 3) {
+                    QTimer::singleShot(2000, this, [self]() { (*self)(); });
+                }
+                return;
             }
             samples->append(clock->nsecsElapsed() / 1e6);
             (*self)();
