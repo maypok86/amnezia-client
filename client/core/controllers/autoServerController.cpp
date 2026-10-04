@@ -10,6 +10,7 @@
 #include <QSharedPointer>
 #include <QTcpSocket>
 #include <algorithm>
+#include <limits>
 
 #include "amneziaApplication.h"
 #include "core/controllers/api/subscriptionController.h"
@@ -43,7 +44,13 @@ namespace
         const char *okAt = "okAt";
         const char *failAt = "failAt";
         const char *fails = "fails";
+        const char *triedAt = "triedAt";
+        const char *tunnelMs = "tunnelMs";
     }
+
+    constexpr int kTunnelSamples = 3;
+    // a server never measured through the tunnel is tried first once a day to learn its latency
+    constexpr qint64 kExploreIntervalMs = 24 * 60 * 60 * 1000;
 
     double median(QVector<double> values)
     {
@@ -88,6 +95,8 @@ AutoServerController::AutoServerController(ServersController *serversController,
     connect(&m_disconnectTimer, &QTimer::timeout, this, [this]() {
         if (m_phase == Phase::WaitingDisconnect) {
             attemptNext();
+        } else if (m_phase == Phase::Closing) {
+            beginProbing();
         }
     });
 
@@ -118,6 +127,23 @@ void AutoServerController::start()
     m_queue.clear();
     m_premiumLocations.clear();
 
+    if (buildCandidates().isEmpty()) {
+        finish(false, ErrorCode::NoError);
+        return;
+    }
+
+    // probes through a still running tunnel would measure the wrong path
+    if (m_connectionController->isConnected()) {
+        m_phase = Phase::Closing;
+        m_disconnectTimer.start(kDisconnectTimeoutMs);
+        m_connectionController->closeConnection();
+        return;
+    }
+    beginProbing();
+}
+
+void AutoServerController::beginProbing()
+{
     QList<Candidate> candidates = buildCandidates();
     if (candidates.isEmpty()) {
         finish(false, ErrorCode::NoError);
@@ -143,7 +169,9 @@ void AutoServerController::start()
         m_queue = tierOne;
 
         for (const auto &c : std::as_const(m_queue)) {
-            qInfo() << "auto server: candidate" << c.serverId << c.host << "rtt" << c.rttMs;
+            const QJsonObject s = m_appSettingsRepository->autoBestServerStats().value(statsKey(c.serverId, c.statsCountry)).toObject();
+            qInfo() << "auto server: candidate" << c.serverId << c.statsCountry << c.host << "tcp" << c.rttMs << "tunnel"
+                    << s.value(statKey::tunnelMs).toDouble(-1);
         }
         attemptNext();
     });
@@ -205,6 +233,7 @@ QList<AutoServerController::Candidate> AutoServerController::buildCandidates() c
             if (!config) continue; // legacy API configs cannot connect anyway
             c.host = config->hostName; // empty until the first config is fetched; ranked by history then
             c.ports = { 443, 22 };
+            c.statsCountry = config->apiConfig.serverCountryCode;
             break;
         }
         }
@@ -236,6 +265,7 @@ QList<AutoServerController::Candidate> AutoServerController::buildPremiumLocatio
             Candidate c;
             c.serverId = serverId;
             c.countryCode = code;
+            c.statsCountry = code;
             c.host = hosts.value(code).toString();
             c.ports = { 443, 22 };
             candidates.append(c);
@@ -326,12 +356,26 @@ void AutoServerController::sortCandidates(QList<Candidate> &candidates) const
 {
     const QJsonObject stats = m_appSettingsRepository->autoBestServerStats();
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    auto statsOf = [&](const Candidate &c) { return stats.value(statsKey(c.serverId, c.statsCountry)).toObject(); };
+    auto msField = [](const QJsonObject &s, const char *key) { return s.value(key).toVariant().toLongLong(); };
 
     auto recentlyFailed = [&](const Candidate &c) {
-        const QJsonObject s = stats.value(statsKey(c.serverId, c.countryCode)).toObject();
-        const qint64 failAt = s.value(statKey::failAt).toVariant().toLongLong();
-        const qint64 okAt = s.value(statKey::okAt).toVariant().toLongLong();
-        return failAt > okAt && now - failAt < kRecentFailureMs;
+        const QJsonObject s = statsOf(c);
+        const qint64 failAt = msField(s, statKey::failAt);
+        return failAt > msField(s, statKey::okAt) && now - failAt < kRecentFailureMs;
+    };
+    // never measured through the tunnel and not tried for a while: worth one attempt to learn it
+    auto shouldExplore = [&](const Candidate &c) {
+        const QJsonObject s = statsOf(c);
+        return !s.contains(statKey::tunnelMs) && now - msField(s, statKey::triedAt) > kExploreIntervalMs;
+    };
+    // lower is better: measured in-tunnel latency, else a rough estimate from the TCP probe
+    auto score = [&](const Candidate &c) {
+        const QJsonObject s = statsOf(c);
+        if (s.contains(statKey::tunnelMs)) {
+            return s.value(statKey::tunnelMs).toDouble();
+        }
+        return c.rttMs >= 0 ? c.rttMs * 3 : std::numeric_limits<double>::infinity();
     };
 
     std::stable_sort(candidates.begin(), candidates.end(), [&](const Candidate &a, const Candidate &b) {
@@ -339,22 +383,20 @@ void AutoServerController::sortCandidates(QList<Candidate> &candidates) const
         if (aFailed != bFailed) {
             return !aFailed;
         }
-        const bool aAnswered = a.rttMs >= 0, bAnswered = b.rttMs >= 0;
-        if (aAnswered != bAnswered) {
-            return aAnswered;
+        const bool aExplore = shouldExplore(a), bExplore = shouldExplore(b);
+        if (aExplore != bExplore) {
+            return aExplore;
         }
-        if (aAnswered) {
-            return a.rttMs < b.rttMs;
+        const double sa = score(a), sb = score(b);
+        if (sa != sb) {
+            return sa < sb;
         }
-        // no TCP answer (firewalled host, strict kill switch, unknown Premium host): use history
-        const QJsonObject sa = stats.value(statsKey(a.serverId, a.countryCode)).toObject();
-        const QJsonObject sb = stats.value(statsKey(b.serverId, b.countryCode)).toObject();
-        const qint64 okA = sa.value(statKey::okAt).toVariant().toLongLong();
-        const qint64 okB = sb.value(statKey::okAt).toVariant().toLongLong();
-        if (okA != okB) {
-            return okA > okB;
+        // nothing measured at all: most recently working first, then fewest failures
+        const QJsonObject ha = statsOf(a), hb = statsOf(b);
+        if (msField(ha, statKey::okAt) != msField(hb, statKey::okAt)) {
+            return msField(ha, statKey::okAt) > msField(hb, statKey::okAt);
         }
-        return sa.value(statKey::fails).toInt() < sb.value(statKey::fails).toInt();
+        return ha.value(statKey::fails).toInt() < hb.value(statKey::fails).toInt();
     });
 }
 
@@ -407,6 +449,7 @@ void AutoServerController::attemptNext()
 
     qInfo() << "auto server: trying" << m_current.serverId << m_current.host << m_current.countryCode;
     m_attemptInProgress = false;
+    recordAttempt(m_current);
     m_serversController->setDefaultServer(m_current.serverId);
     emit connectRequested();
 }
@@ -416,6 +459,17 @@ void AutoServerController::onConnectionStateChanged(Vpn::ConnectionState state)
     switch (m_phase) {
     case Phase::Idle:
     case Phase::Probing:
+        return;
+
+    case Phase::Closing:
+        if (state == Vpn::ConnectionState::Disconnected) {
+            m_disconnectTimer.stop();
+            QTimer::singleShot(300, this, [this]() {
+                if (m_phase == Phase::Closing) {
+                    beginProbing();
+                }
+            });
+        }
         return;
 
     case Phase::WaitingDisconnect:
@@ -506,7 +560,9 @@ void AutoServerController::onAttemptSucceeded()
     const qint64 handshakeMs = m_connectingClock.isValid() ? m_connectingClock.elapsed() : 0;
     qInfo() << "auto server: connected to" << m_current.serverId << m_current.countryCode << "in" << handshakeMs << "ms";
     recordSuccess(m_current, handshakeMs);
+    const Candidate connected = m_current;
     finish(true, ErrorCode::NoError);
+    measureTunnelLatency(connected);
 }
 
 void AutoServerController::onAttemptFailed(bool alreadyDisconnected, ErrorCode error)
@@ -560,11 +616,12 @@ void AutoServerController::finish(bool success, ErrorCode lastError)
 void AutoServerController::recordSuccess(const Candidate &candidate, qint64 handshakeMs)
 {
     QJsonObject stats = m_appSettingsRepository->autoBestServerStats();
-    QJsonObject s = stats.value(statsKey(candidate.serverId, QString())).toObject();
+    const QString key = statsKey(candidate.serverId, candidate.statsCountry);
+    QJsonObject s = stats.value(key).toObject();
     s[statKey::okMs] = static_cast<double>(handshakeMs);
     s[statKey::okAt] = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
     s[statKey::fails] = 0;
-    stats[statsKey(candidate.serverId, QString())] = s;
+    stats[key] = s;
     m_appSettingsRepository->setAutoBestServerStats(stats);
 
     // remember which host this Premium location resolves to, so it can be probed next time
@@ -583,10 +640,60 @@ void AutoServerController::recordSuccess(const Candidate &candidate, qint64 hand
 void AutoServerController::recordFailure(const Candidate &candidate)
 {
     QJsonObject stats = m_appSettingsRepository->autoBestServerStats();
-    const QString key = statsKey(candidate.serverId, candidate.countryCode);
+    const QString key = statsKey(candidate.serverId, candidate.statsCountry);
     QJsonObject s = stats.value(key).toObject();
     s[statKey::failAt] = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
     s[statKey::fails] = s.value(statKey::fails).toInt() + 1;
     stats[key] = s;
     m_appSettingsRepository->setAutoBestServerStats(stats);
+}
+
+void AutoServerController::recordAttempt(const Candidate &candidate)
+{
+    QJsonObject stats = m_appSettingsRepository->autoBestServerStats();
+    const QString key = statsKey(candidate.serverId, candidate.statsCountry);
+    QJsonObject s = stats.value(key).toObject();
+    s[statKey::triedAt] = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
+    stats[key] = s;
+    m_appSettingsRepository->setAutoBestServerStats(stats);
+}
+
+void AutoServerController::measureTunnelLatency(const Candidate &candidate)
+{
+    // a few small HTTPS requests through the fresh tunnel; the median is stored as the server's latency
+    auto samples = QSharedPointer<QVector<double>>::create();
+    auto next = QSharedPointer<std::function<void()>>::create();
+    QWeakPointer<std::function<void()>> weakNext = next;
+    *next = [this, candidate, samples, weakNext]() {
+        const auto self = weakNext.toStrongRef();
+        if (samples->size() >= kTunnelSamples || !self) {
+            if (samples->isEmpty()) {
+                return;
+            }
+            const double ms = median(*samples);
+            QJsonObject stats = m_appSettingsRepository->autoBestServerStats();
+            const QString key = statsKey(candidate.serverId, candidate.statsCountry);
+            QJsonObject s = stats.value(key).toObject();
+            s[statKey::tunnelMs] = ms;
+            stats[key] = s;
+            m_appSettingsRepository->setAutoBestServerStats(stats);
+            qInfo() << "auto server: tunnel latency via" << candidate.serverId << candidate.statsCountry << ms << "ms";
+            return;
+        }
+        QNetworkRequest request { QUrl(kVerifyUrl) };
+        request.setTransferTimeout(kVerifyTimeoutMs);
+        auto clock = QSharedPointer<QElapsedTimer>::create();
+        clock->start();
+        QNetworkReply *reply = amnApp->networkManager()->get(request);
+        connect(reply, &QNetworkReply::finished, this, [this, reply, clock, samples, self]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError || !m_connectionController->isConnected()) {
+                return; // not connected any more or no internet: keep whatever was measured before
+            }
+            samples->append(clock->nsecsElapsed() / 1e6);
+            (*self)();
+        });
+    };
+    // let routes and DNS settle first
+    QTimer::singleShot(1500, this, [next]() { (*next)(); });
 }

@@ -62,12 +62,14 @@ private:
         QString serverId;
         QString host;
         QVector<int> ports;
-        QString countryCode; // Premium location to switch to before connecting; empty = keep current
-        double rttMs = -1;   // median TCP connect time, -1 = no answer
+        QString countryCode;  // Premium location to switch to before connecting; empty = keep current
+        QString statsCountry; // Premium location the stats belong to (current or target one)
+        double rttMs = -1;    // median TCP connect time, -1 = no answer
     };
 
-    enum class Phase { Idle, Probing, Attempting, WaitingDisconnect, Verifying };
+    enum class Phase { Idle, Closing, Probing, Attempting, WaitingDisconnect, Verifying };
 
+    void beginProbing();
     QList<Candidate> buildCandidates() const;
     QList<Candidate> buildPremiumLocationCandidates() const;
     void probe(QList<Candidate> candidates, int rounds, std::function<void(QList<Candidate>)> done);
@@ -81,6 +83,10 @@ private:
 
     void recordSuccess(const Candidate &candidate, qint64 handshakeMs);
     void recordFailure(const Candidate &candidate);
+    void recordAttempt(const Candidate &candidate);
+    // in-tunnel latency of the server we just connected to: the main ranking signal for next time,
+    // since most AWG servers answer neither TCP nor ICMP before the tunnel is up
+    void measureTunnelLatency(const Candidate &candidate);
 
     ServersController *m_serversController;
     SecureServersRepository *m_serversRepository;
