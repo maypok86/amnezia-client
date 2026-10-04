@@ -91,12 +91,24 @@ void CoreSignalHandlers::initAllHandlers()
 void CoreSignalHandlers::initErrorMessagesHandler()
 {
     connect(m_coreController->m_connectionUiController, &ConnectionUiController::connectionErrorOccurred, this, [this](ErrorCode errorCode) {
-        emit m_coreController->m_pageController->showErrorMessage(errorCode);
+        // while auto mode is iterating, a failing candidate is not an error for the user yet
+        if (!m_coreController->m_autoServerController->isRunning()) {
+            emit m_coreController->m_pageController->showErrorMessage(errorCode);
+        }
         m_coreController->m_connectionController->setConnectionState(Vpn::ConnectionState::Disconnected);
     });
 
-    connect(m_coreController->m_subscriptionUiController, &SubscriptionUiController::errorOccurred, m_coreController->m_pageController,
-            qOverload<ErrorCode>(&PageController::showErrorMessage));
+    connect(m_coreController->m_subscriptionUiController, &SubscriptionUiController::errorOccurred, this, [this](ErrorCode errorCode) {
+        if (!m_coreController->m_autoServerController->isRunning()) {
+            emit m_coreController->m_pageController->showErrorMessage(errorCode);
+        }
+    });
+
+    connect(m_coreController->m_autoServerController, &AutoServerController::finished, this, [this](bool success, ErrorCode lastError) {
+        if (!success && lastError != ErrorCode::NoError) {
+            emit m_coreController->m_pageController->showErrorMessage(lastError);
+        }
+    });
 
     connect(m_coreController->m_settingsUiController, &SettingsUiController::errorOccurred, m_coreController->m_pageController,
             qOverload<ErrorCode>(&PageController::showErrorMessage));
@@ -313,6 +325,9 @@ void CoreSignalHandlers::initAppSplitTunnelingModelUpdateHandler()
 
 void CoreSignalHandlers::initPrepareConfigHandler()
 {
+    connect(m_coreController->m_autoServerController, &AutoServerController::connectRequested,
+            m_coreController->m_connectionUiController, &ConnectionUiController::connectDefaultServer);
+
     connect(m_coreController->m_connectionUiController, &ConnectionUiController::prepareConfig, this, [this]() {
         m_coreController->m_connectionController->setConnectionState(Vpn::ConnectionState::Preparing);
 

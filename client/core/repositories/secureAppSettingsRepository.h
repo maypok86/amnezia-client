@@ -73,6 +73,19 @@ public:
     
     bool isAutoConnect() const;
     void setAutoConnect(bool enabled);
+
+    // "Auto best server" mode: pick the fastest working server on connect
+    bool isAutoBestServer() const;
+    void setAutoBestServer(bool enabled);
+    // per-server connect history used to rank candidates: { serverId: { okMs, okAt, failAt, fails } }
+    QJsonObject autoBestServerStats() const;
+    void setAutoBestServerStats(const QJsonObject &stats);
+    // Premium hosts learned per country: { serverId: { countryCode: hostName } }
+    QJsonObject autoBestServerCountryHosts() const;
+    void setAutoBestServerCountryHosts(const QJsonObject &hosts);
+    // last time auto mode switched a Premium country (switching reissues the device key)
+    qint64 autoBestServerLastCountrySwitch() const;
+    void setAutoBestServerLastCountrySwitch(qint64 msecsSinceEpoch);
     bool isStartMinimized() const;
     void setStartMinimized(bool enabled);
     bool isScreenshotsEnabled() const;

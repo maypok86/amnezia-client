@@ -354,6 +354,46 @@ void SecureAppSettingsRepository::setAutoConnect(bool enabled)
     setValue("Conf/autoConnect", enabled);
 }
 
+bool SecureAppSettingsRepository::isAutoBestServer() const
+{
+    return value("Conf/autoBestServer", false).toBool();
+}
+
+void SecureAppSettingsRepository::setAutoBestServer(bool enabled)
+{
+    setValue("Conf/autoBestServer", enabled);
+}
+
+QJsonObject SecureAppSettingsRepository::autoBestServerStats() const
+{
+    return QJsonDocument::fromJson(value("Conf/autoBestServerStats").toByteArray()).object();
+}
+
+void SecureAppSettingsRepository::setAutoBestServerStats(const QJsonObject &stats)
+{
+    setValue("Conf/autoBestServerStats", QJsonDocument(stats).toJson(QJsonDocument::Compact));
+}
+
+QJsonObject SecureAppSettingsRepository::autoBestServerCountryHosts() const
+{
+    return QJsonDocument::fromJson(value("Conf/autoBestServerCountryHosts").toByteArray()).object();
+}
+
+void SecureAppSettingsRepository::setAutoBestServerCountryHosts(const QJsonObject &hosts)
+{
+    setValue("Conf/autoBestServerCountryHosts", QJsonDocument(hosts).toJson(QJsonDocument::Compact));
+}
+
+qint64 SecureAppSettingsRepository::autoBestServerLastCountrySwitch() const
+{
+    return value("Conf/autoBestServerLastCountrySwitch", 0).toLongLong();
+}
+
+void SecureAppSettingsRepository::setAutoBestServerLastCountrySwitch(qint64 msecsSinceEpoch)
+{
+    setValue("Conf/autoBestServerLastCountrySwitch", msecsSinceEpoch);
+}
+
 bool SecureAppSettingsRepository::isStartMinimized() const
 {
     return value("Conf/startMinimized", false).toBool();

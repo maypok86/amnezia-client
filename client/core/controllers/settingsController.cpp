@@ -202,6 +202,16 @@ bool SettingsController::isAutoConnectEnabled() const
     return m_appSettingsRepository->isAutoConnect();
 }
 
+bool SettingsController::isAutoBestServerEnabled() const
+{
+    return m_appSettingsRepository->isAutoBestServer();
+}
+
+void SettingsController::toggleAutoBestServer(bool enable)
+{
+    m_appSettingsRepository->setAutoBestServer(enable);
+}
+
 void SettingsController::toggleAutoConnect(bool enable)
 {
     m_appSettingsRepository->setAutoConnect(enable);

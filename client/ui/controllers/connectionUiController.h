@@ -10,6 +10,8 @@
 #include "core/protocols/vpnProtocol.h"
 #include "core/controllers/serversController.h"
 
+class AutoServerController;
+
 class ConnectionUiController : public QObject
 {
     Q_OBJECT
@@ -29,8 +31,12 @@ public:
     bool isConnectionInProgress() const;
     QString connectionStateText() const;
 
+    void setAutoServerController(AutoServerController *autoServerController);
+
 public slots:
     void toggleConnection();
+    // regular connect flow for the current default server (also used per candidate by AutoServerController)
+    void connectDefaultServer();
 
     void openConnection();
     void closeConnection();
@@ -59,6 +65,7 @@ private:
 
     ConnectionController* m_connectionController;
     ServersController* m_serversController;
+    AutoServerController* m_autoServerController = nullptr;
 
     bool m_isConnected = false;
     bool m_isConnectionInProgress = false;

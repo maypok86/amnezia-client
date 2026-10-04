@@ -48,6 +48,9 @@ public:
     bool isAutoConnectEnabled() const;
     void toggleAutoConnect(bool enable);
 
+    bool isAutoBestServerEnabled() const;
+    void toggleAutoBestServer(bool enable);
+
     bool isAutoStartEnabled() const;
     void toggleAutoStart(bool enable);
 

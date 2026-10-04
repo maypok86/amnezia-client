@@ -42,6 +42,7 @@
 #include "core/controllers/selfhosted/installController.h"
 #include "core/controllers/settingsController.h"
 #include "core/controllers/connectionController.h"
+#include "core/controllers/autoServerController.h"
 #include "core/controllers/updateController.h"
 
 #include "core/repositories/secureServersRepository.h"
@@ -197,6 +198,7 @@ private:
     InstallController* m_installController;
     ExportController* m_exportController;
     ConnectionController* m_connectionController;
+    AutoServerController* m_autoServerController;
     SettingsController* m_settingsController;
 
     ContainersModel* m_containersModel;

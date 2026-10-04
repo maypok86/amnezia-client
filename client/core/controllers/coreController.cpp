@@ -169,11 +169,14 @@ void CoreController::initCoreControllers()
     m_importCoreController = new ImportController(m_serversRepository, m_appSettingsRepository, this);
     m_connectionController = new ConnectionController(m_serversRepository, m_appSettingsRepository, m_vpnConnection.get(), this);
     m_settingsController = new SettingsController(m_serversRepository, m_appSettingsRepository, this);
+    m_autoServerController = new AutoServerController(m_serversController, m_serversRepository, m_appSettingsRepository,
+                                                      m_connectionController, m_subscriptionController, this);
 }
 
 void CoreController::initControllers()
 {
     m_connectionUiController = new ConnectionUiController(m_connectionController, m_serversController, this);
+    m_connectionUiController->setAutoServerController(m_autoServerController);
     setQmlContextProperty("ConnectionController", m_connectionUiController);
 
     if (m_engine) {

@@ -43,6 +43,7 @@ set(HEADERS ${HEADERS}
     ${CLIENT_ROOT_DIR}/core/controllers/allowedDnsController.h
     ${CLIENT_ROOT_DIR}/core/controllers/selfhosted/exportController.h
     ${CLIENT_ROOT_DIR}/core/controllers/connectionController.h
+    ${CLIENT_ROOT_DIR}/core/controllers/autoServerController.h
     ${CLIENT_ROOT_DIR}/core/controllers/settingsController.h
     ${CLIENT_ROOT_DIR}/core/controllers/api/servicesCatalogController.h
     ${CLIENT_ROOT_DIR}/core/controllers/api/storePurchaseController.h
@@ -128,6 +129,7 @@ set(SOURCES ${SOURCES}
     ${CLIENT_ROOT_DIR}/core/controllers/allowedDnsController.cpp
     ${CLIENT_ROOT_DIR}/core/controllers/selfhosted/exportController.cpp
     ${CLIENT_ROOT_DIR}/core/controllers/connectionController.cpp
+    ${CLIENT_ROOT_DIR}/core/controllers/autoServerController.cpp
     ${CLIENT_ROOT_DIR}/core/controllers/settingsController.cpp
     ${CLIENT_ROOT_DIR}/core/controllers/api/servicesCatalogController.cpp
     ${CLIENT_ROOT_DIR}/core/controllers/api/storePurchaseController.cpp

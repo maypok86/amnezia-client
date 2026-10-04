@@ -62,6 +62,9 @@ public slots:
     bool isAutoConnectEnabled();
     void toggleAutoConnect(bool enable);
 
+    bool isAutoBestServerEnabled();
+    void toggleAutoBestServer(bool enable);
+
     bool isAutoStartEnabled();
     void toggleAutoStart(bool enable);
 

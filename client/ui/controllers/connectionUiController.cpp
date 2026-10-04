@@ -7,6 +7,7 @@
 #endif
 
 #include "amneziaApplication.h"
+#include "core/controllers/autoServerController.h"
 #include "core/controllers/serversController.h"
 #include "core/models/containerConfig.h"
 #include "core/utils/containerEnum.h"
@@ -121,8 +122,19 @@ QString ConnectionUiController::connectionStateText() const
     return m_connectionStateText;
 }
 
+void ConnectionUiController::setAutoServerController(AutoServerController *autoServerController)
+{
+    m_autoServerController = autoServerController;
+}
+
 void ConnectionUiController::toggleConnection()
 {
+    // a press while auto mode is still picking a server stops it
+    if (m_autoServerController && m_autoServerController->isRunning()) {
+        m_autoServerController->cancel();
+        return;
+    }
+
     if (m_state == Vpn::ConnectionState::Preparing) {
         emit preparingConfig();
         return;
@@ -132,20 +144,27 @@ void ConnectionUiController::toggleConnection()
         closeConnection();
     } else if (isConnected()) {
         closeConnection();
+    } else if (m_autoServerController && m_autoServerController->isEnabled()) {
+        m_autoServerController->start();
     } else {
-        const QString serverId = m_serversController->getDefaultServerId();
-        if (serverId.isEmpty()) {
-            return;
-        }
-
-        const ErrorCode errorCode = m_connectionController->isConnectionSupported(serverId);
-        if (errorCode != ErrorCode::NoError) {
-            notifyConnectionBlocked(errorCode);
-            return;
-        }
-
-        emit prepareConfig();
+        connectDefaultServer();
     }
+}
+
+void ConnectionUiController::connectDefaultServer()
+{
+    const QString serverId = m_serversController->getDefaultServerId();
+    if (serverId.isEmpty()) {
+        return;
+    }
+
+    const ErrorCode errorCode = m_connectionController->isConnectionSupported(serverId);
+    if (errorCode != ErrorCode::NoError) {
+        notifyConnectionBlocked(errorCode);
+        return;
+    }
+
+    emit prepareConfig();
 }
 
 void ConnectionUiController::notifyConnectionBlocked(ErrorCode errorCode)

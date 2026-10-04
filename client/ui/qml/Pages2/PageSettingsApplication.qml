@@ -139,6 +139,25 @@ PageType {
                 }
             }
 
+            DividerType {}
+
+            SwitcherType {
+                id: switcherAutoBestServer
+
+                Layout.fillWidth: true
+                Layout.margins: 16
+
+                text: qsTr("Auto select best server")
+                descriptionText: qsTr("On connect, try all servers (self-hosted and subscription locations) from the fastest and use the first one that works")
+
+                checked: SettingsController.isAutoBestServerEnabled()
+                onToggled: function() {
+                    if (checked !== SettingsController.isAutoBestServerEnabled()) {
+                        SettingsController.toggleAutoBestServer(checked)
+                    }
+                }
+            }
+
             DividerType {
                 visible: !GC.isMobile() && !IsMacOsNeBuild
             }

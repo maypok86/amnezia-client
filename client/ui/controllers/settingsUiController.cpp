@@ -196,6 +196,16 @@ bool SettingsUiController::isAutoConnectEnabled()
     return m_settingsController->isAutoConnectEnabled();
 }
 
+bool SettingsUiController::isAutoBestServerEnabled()
+{
+    return m_settingsController->isAutoBestServerEnabled();
+}
+
+void SettingsUiController::toggleAutoBestServer(bool enable)
+{
+    m_settingsController->toggleAutoBestServer(enable);
+}
+
 void SettingsUiController::toggleAutoConnect(bool enable)
 {
     m_settingsController->toggleAutoConnect(enable);
