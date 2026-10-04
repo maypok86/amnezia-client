@@ -38,6 +38,9 @@ android {
 
     defaultConfig {
         applicationId = "org.amnezia.vpn"
+        // personal build: installs next to the official app
+        applicationIdSuffix = ".personal"
+        manifestPlaceholders["appLabel"] = "AmneziaVPN Personal"
         targetSdk = qtTargetSdkVersion.toInt()
 
         // keeps language resources for only the locales specified below
