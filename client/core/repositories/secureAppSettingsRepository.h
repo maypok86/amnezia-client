@@ -77,6 +77,9 @@ public:
     // "Auto best server" mode: pick the fastest working server on connect
     bool isAutoBestServer() const;
     void setAutoBestServer(bool enabled);
+    // one-time setup of the personal build (start with the system)
+    bool isPersonalDefaultsApplied() const;
+    void setPersonalDefaultsApplied(bool applied);
     // per-server connect history used to rank candidates: { serverId: { okMs, okAt, failAt, fails } }
     QJsonObject autoBestServerStats() const;
     void setAutoBestServerStats(const QJsonObject &stats);

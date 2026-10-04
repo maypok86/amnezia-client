@@ -346,7 +346,8 @@ void SecureAppSettingsRepository::setStrictKillSwitchEnabled(bool enabled)
 
 bool SecureAppSettingsRepository::isAutoConnect() const
 {
-    return value("Conf/autoConnect", false).toBool();
+    // personal build: connect on start unless turned off
+    return value("Conf/autoConnect", true).toBool();
 }
 
 void SecureAppSettingsRepository::setAutoConnect(bool enabled)
@@ -356,12 +357,23 @@ void SecureAppSettingsRepository::setAutoConnect(bool enabled)
 
 bool SecureAppSettingsRepository::isAutoBestServer() const
 {
-    return value("Conf/autoBestServer", false).toBool();
+    // personal build: on unless turned off
+    return value("Conf/autoBestServer", true).toBool();
 }
 
 void SecureAppSettingsRepository::setAutoBestServer(bool enabled)
 {
     setValue("Conf/autoBestServer", enabled);
+}
+
+bool SecureAppSettingsRepository::isPersonalDefaultsApplied() const
+{
+    return value("Conf/personalDefaultsApplied", false).toBool();
+}
+
+void SecureAppSettingsRepository::setPersonalDefaultsApplied(bool applied)
+{
+    setValue("Conf/personalDefaultsApplied", applied);
 }
 
 QJsonObject SecureAppSettingsRepository::autoBestServerStats() const

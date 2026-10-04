@@ -38,6 +38,17 @@ SettingsController::SettingsController(SecureServersRepository* serversRepositor
 {
     m_appVersion = QString("%1 (%2, %3)").arg(QString(APP_VERSION), __DATE__, GIT_COMMIT_HASH);
     m_isDevModeEnabled = m_appSettingsRepository->isDevGatewayEnv();
+
+    // personal build: start with the system, minimized, the first time it runs; the user can turn it off
+    if (!m_appSettingsRepository->isPersonalDefaultsApplied()) {
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+        if (!Autostart::isAutostart()) {
+            Autostart::setAutostart(true);
+            m_appSettingsRepository->setStartMinimized(true);
+        }
+#endif
+        m_appSettingsRepository->setPersonalDefaultsApplied(true);
+    }
 }
 
 void SettingsController::toggleAmneziaDns(bool enable)
