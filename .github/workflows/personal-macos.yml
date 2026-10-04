@@ -16,6 +16,12 @@ jobs:
     env:
       QT_VERSION: 6.10.1
       PROD_AGW_PUBLIC_KEY: ${{ secrets.PROD_AGW_PUBLIC_KEY }}
+      # public build-time values, the same nixpkgs extracted from the official binary: storage and
+      # fallback endpoints let Premium reach the gateway through proxies when gw.amnezia.org is blocked
+      PROD_S3_ENDPOINT: 'https://s3.eu-north-1.amazonaws.com/amnezia/, https://storage.googleapis.com/lambda-list/, https://amnzstrg01.blob.core.windows.net/lambda-list/, https://objectstorage.eu-zurich-1.oraclecloud.com/n/zrhfyaq6qxvh/b/lambda-list/o/'
+      FALLBACK_S3_ENDPOINT: 'https://storage.mwsapis.ru/lambda-list/, https://46.8.209.252/lambda-list/'
+      FREE_V2_ENDPOINT: '13.248.139.44'
+      PREM_V1_ENDPOINT: '52.223.54.40'
 
     steps:
     - name: 'Get sources'
