@@ -406,6 +406,7 @@ void AutoServerController::attemptNext()
     }
 
     qInfo() << "auto server: trying" << m_current.serverId << m_current.host << m_current.countryCode;
+    m_attemptInProgress = false;
     m_serversController->setDefaultServer(m_current.serverId);
     emit connectRequested();
 }
@@ -441,7 +442,11 @@ void AutoServerController::onConnectionStateChanged(Vpn::ConnectionState state)
     }
 
     switch (state) {
+    case Vpn::ConnectionState::Preparing:
+        m_attemptInProgress = true;
+        break;
     case Vpn::ConnectionState::Connecting:
+        m_attemptInProgress = true;
         if (!m_handshakeTimer.isActive()) {
             m_connectingClock.start();
             m_handshakeTimer.start(kHandshakeTimeoutMs);
@@ -463,7 +468,9 @@ void AutoServerController::onConnectionStateChanged(Vpn::ConnectionState state)
         onAttemptFailed(false, m_connectionController->lastConnectionError());
         break;
     case Vpn::ConnectionState::Disconnected:
-        onAttemptFailed(true, m_connectionController->lastConnectionError());
+        if (m_attemptInProgress) {
+            onAttemptFailed(true, m_connectionController->lastConnectionError());
+        }
         break;
     default:
         break;

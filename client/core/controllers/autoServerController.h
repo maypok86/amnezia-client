@@ -94,6 +94,9 @@ private:
     bool m_premiumTierQueued = false;
     int m_countrySwitches = 0;
     Candidate m_current;
+    // set once this attempt reached Preparing/Connecting: a late Disconnected left over from closing
+    // the previous candidate must not count as a failure of the current one
+    bool m_attemptInProgress = false;
     QString m_originalDefaultServerId;
     ErrorCode m_lastError = ErrorCode::NoError;
 
