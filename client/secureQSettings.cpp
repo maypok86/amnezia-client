@@ -217,7 +217,16 @@ QByteArray SecureQSettings::getEncKey() const
         return m_key;
     }
     // load keys from system key storage
-    m_key = getSecTag(settingsKeyTag);
+    QKeychain::Error error = QKeychain::NoError;
+    m_key = getSecTag(settingsKeyTag, &error);
+
+    // only a missing entry means there is no key yet. A denied or cancelled keychain prompt (e.g. after
+    // the app signature changed) must not replace the existing key: everything encrypted with it
+    // would become unreadable
+    if (m_key.isEmpty() && error != QKeychain::NoError && error != QKeychain::EntryNotFound) {
+        qCritical() << "SecureQSettings::getEncKey Unable to read from keychain, keeping the stored one";
+        return {};
+    }
 
     if (m_key.isEmpty()) {
         // Create new key
@@ -245,7 +254,16 @@ QByteArray SecureQSettings::getEncIv() const
         return m_iv;
     }
     // load keys from system key storage
-    m_iv = getSecTag(settingsIvTag);
+    QKeychain::Error error = QKeychain::NoError;
+    m_iv = getSecTag(settingsIvTag, &error);
+
+    // only a missing entry means there is no key yet. A denied or cancelled keychain prompt (e.g. after
+    // the app signature changed) must not replace the existing key: everything encrypted with it
+    // would become unreadable
+    if (m_iv.isEmpty() && error != QKeychain::NoError && error != QKeychain::EntryNotFound) {
+        qCritical() << "SecureQSettings::getEncIv Unable to read from keychain, keeping the stored one";
+        return {};
+    }
 
     if (m_iv.isEmpty()) {
         // Create new IV
@@ -266,7 +284,7 @@ QByteArray SecureQSettings::getEncIv() const
     return m_iv;
 }
 
-QByteArray SecureQSettings::getSecTag(const QString &tag)
+QByteArray SecureQSettings::getSecTag(const QString &tag, QKeychain::Error *error)
 {
     auto job = QSharedPointer<ReadPasswordJob>(new ReadPasswordJob(keyChainName), &QObject::deleteLater);
     job->setAutoDelete(false);
@@ -278,6 +296,9 @@ QByteArray SecureQSettings::getSecTag(const QString &tag)
 
     if (job->error()) {
         qCritical() << "SecureQSettings::getSecTag Error:" << job->errorString();
+    }
+    if (error) {
+        *error = job->error();
     }
 
     return job->binaryData();

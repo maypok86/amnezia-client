@@ -35,7 +35,7 @@ private:
     QByteArray getEncKey() const;
     QByteArray getEncIv() const;
 
-    static QByteArray getSecTag(const QString &tag);
+    static QByteArray getSecTag(const QString &tag, QKeychain::Error *error = nullptr);
     static void setSecTag(const QString &tag, const QByteArray &data);
 
     QSettings m_settings;
