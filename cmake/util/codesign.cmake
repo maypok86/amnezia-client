@@ -8,10 +8,13 @@ function(codesign_sign_files files signature keychain)
     set(args
         --force
         --verbose
-        --timestamp
-        --options runtime
         --sign "${signature}"
     )
+    # "-" is an ad-hoc signature (personal builds without a Developer ID): no timestamp, and no
+    # hardened runtime, whose library validation would reject the ad-hoc signed frameworks
+    if(NOT signature STREQUAL "-")
+        list(APPEND args --timestamp --options runtime)
+    endif()
 
     if(keychain)
         list(APPEND args --keychain "${keychain}")
