@@ -81,6 +81,11 @@ private:
     void verifyTunnel();
     void finish(bool success, ErrorCode lastError);
 
+    // watchdog for the established connection: a dead tunnel triggers a new run
+    void startHealthWatch(const Candidate &connected);
+    void stopHealthWatch();
+    void checkHealth();
+
     void recordSuccess(const Candidate &candidate, qint64 handshakeMs);
     void recordFailure(const Candidate &candidate);
     void recordAttempt(const Candidate &candidate);
@@ -111,6 +116,11 @@ private:
     QTimer m_disconnectTimer;  // fallback if Disconnected never arrives after closeConnection()
     QElapsedTimer m_connectingClock;
     QPointer<QNetworkReply> m_verifyReply;
+
+    QTimer m_healthTimer;
+    int m_healthFailures = 0;
+    Candidate m_connected;
+    QPointer<QNetworkReply> m_healthReply;
 };
 
 #endif // AUTOSERVERCONTROLLER_H

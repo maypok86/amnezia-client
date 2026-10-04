@@ -49,8 +49,14 @@ namespace
     }
 
     constexpr int kTunnelSamples = 3;
-    // a server never measured through the tunnel is tried first once a day to learn its latency
-    constexpr qint64 kExploreIntervalMs = 24 * 60 * 60 * 1000;
+    // a server never measured through the tunnel is tried first to learn its latency, but not more
+    // often than this (a failed attempt also keeps it at the end for kRecentFailureMs)
+    constexpr qint64 kExploreIntervalMs = 10 * 60 * 1000;
+
+    // while connected, the tunnel is checked periodically; this many failed checks in a row switch
+    // to the next best server
+    constexpr int kHealthIntervalMs = 60 * 1000;
+    constexpr int kHealthFailuresToSwitch = 3;
 
     double median(QVector<double> values)
     {
@@ -100,6 +106,9 @@ AutoServerController::AutoServerController(ServersController *serversController,
         }
     });
 
+    m_healthTimer.setInterval(kHealthIntervalMs);
+    connect(&m_healthTimer, &QTimer::timeout, this, &AutoServerController::checkHealth);
+
     connect(m_connectionController, &ConnectionController::connectionStateChanged, this,
             &AutoServerController::onConnectionStateChanged);
 }
@@ -120,6 +129,7 @@ void AutoServerController::start()
         return;
     }
 
+    stopHealthWatch();
     m_originalDefaultServerId = m_serversController->getDefaultServerId();
     m_lastError = ErrorCode::NoError;
     m_premiumTierQueued = false;
@@ -333,10 +343,14 @@ void AutoServerController::probe(QList<Candidate> candidates, int rounds, std::f
                     }
                 };
 
-                // connected or actively refused: both are a full round trip to the host
+                // connected or actively refused: both are a full round trip to the host. A refusal faster
+                // than any network round trip comes from the local firewall (kill switch), not the host
                 connect(socket, &QTcpSocket::connected, socket, [complete]() { complete(true); });
-                connect(socket, &QTcpSocket::errorOccurred, socket, [complete](QAbstractSocket::SocketError error) {
-                    complete(error == QAbstractSocket::ConnectionRefusedError);
+                connect(socket, &QTcpSocket::errorOccurred, socket, [complete, clock, socket](QAbstractSocket::SocketError error) {
+                    if (socket->property("done").toBool()) {
+                        return; // clock is already gone
+                    }
+                    complete(error == QAbstractSocket::ConnectionRefusedError && clock->nsecsElapsed() > 1000000);
                 });
                 connect(timeout, &QTimer::timeout, socket, [complete]() { complete(false); });
 
@@ -458,6 +472,30 @@ void AutoServerController::onConnectionStateChanged(Vpn::ConnectionState state)
 {
     switch (m_phase) {
     case Phase::Idle:
+        if (state == Vpn::ConnectionState::Connected) {
+            // back after the platform's own reconnect (network change): keep watching the same server
+            if (!m_healthTimer.isActive() && !m_connected.serverId.isEmpty() && isEnabled()
+                && m_serversController->getDefaultServerId() == m_connected.serverId) {
+                m_healthFailures = 0;
+                m_healthTimer.start();
+            }
+        } else if (m_healthTimer.isActive()
+                   && (state == Vpn::ConnectionState::Disconnecting || state == Vpn::ConnectionState::Disconnected
+                       || state == Vpn::ConnectionState::Error || state == Vpn::ConnectionState::Unknown)) {
+            const bool broken = state == Vpn::ConnectionState::Error || state == Vpn::ConnectionState::Unknown;
+            stopHealthWatch();
+            if (broken) {
+                // the tunnel died on its own (not a user disconnect): pick the next best server
+                qInfo() << "auto server: connection to" << m_connected.serverId << "broke, reselecting";
+                recordFailure(m_connected);
+                QTimer::singleShot(2000, this, [this]() {
+                    if (!isRunning() && !m_connectionController->isConnected()) {
+                        start();
+                    }
+                });
+            }
+        }
+        return;
     case Phase::Probing:
         return;
 
@@ -563,6 +601,59 @@ void AutoServerController::onAttemptSucceeded()
     const Candidate connected = m_current;
     finish(true, ErrorCode::NoError);
     measureTunnelLatency(connected);
+    startHealthWatch(connected);
+}
+
+void AutoServerController::startHealthWatch(const Candidate &connected)
+{
+    m_connected = connected;
+    m_healthFailures = 0;
+    m_healthTimer.start();
+}
+
+void AutoServerController::stopHealthWatch()
+{
+    m_healthTimer.stop();
+    m_healthFailures = 0;
+    if (m_healthReply) {
+        m_healthReply->abort();
+    }
+}
+
+void AutoServerController::checkHealth()
+{
+    if (isRunning() || !m_connectionController->isConnected()) {
+        stopHealthWatch();
+        return;
+    }
+    if (m_healthReply) {
+        return; // previous check still running
+    }
+    QNetworkRequest request { QUrl(kVerifyUrl) };
+    request.setTransferTimeout(kVerifyTimeoutMs);
+    m_healthReply = amnApp->networkManager()->get(request);
+    connect(m_healthReply, &QNetworkReply::finished, this, [this, reply = m_healthReply]() {
+        if (!reply) {
+            return;
+        }
+        reply->deleteLater();
+        if (!m_healthTimer.isActive()) {
+            return; // stopped meanwhile (disconnect, new run)
+        }
+        if (reply->error() == QNetworkReply::NoError) {
+            m_healthFailures = 0;
+            return;
+        }
+        ++m_healthFailures;
+        qInfo() << "auto server: tunnel check" << m_healthFailures << "of" << kHealthFailuresToSwitch << "failed on"
+                << m_connected.serverId << reply->errorString();
+        if (m_healthFailures >= kHealthFailuresToSwitch) {
+            qInfo() << "auto server: tunnel via" << m_connected.serverId << "is dead, reselecting";
+            recordFailure(m_connected);
+            stopHealthWatch();
+            start();
+        }
+    });
 }
 
 void AutoServerController::onAttemptFailed(bool alreadyDisconnected, ErrorCode error)
